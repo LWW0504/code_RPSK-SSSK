@@ -1,0 +1,148 @@
+clear 
+close all
+clc
+
+
+k = 9;
+
+MCruns = 10;
+%--------------------------------------------------------------------------
+
+%----- Algorithm parameters -----------------------------------------------
+
+lambda = 0.001;
+beta = 0.0001;
+mu = 2;
+%--------------------------------------------------------------------------
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%  do not modify from this point on
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% total initial training sample
+n_train =320;
+train_perclass = round(n_train/k);
+
+MMiter = MCruns;
+
+
+load Pavia_trainall
+load Pavia_image;
+im = img;
+sz = size(im);
+ clear img;
+
+
+im = ToVector(im);
+im = im';
+
+sz(3) = size(im,1);
+
+im = im./repmat(sqrt(sum(im.^2)),sz(3),1);  
+
+[~,x]=pca(im');
+p=1;
+x=x(:,1:p);%return
+img1=reshape(x, sz(1),sz(2), p);
+
+img1=mat2gray(img1);
+img1=im2uint8(img1);
+%trainall = trainall';
+
+CA_SVM = [];
+fprintf('\nStarting Monte Carlo runs \n\n');t=0;
+for iter =1:1
+    fprintf('MC run %d \n', iter);
+    
+
+  indexes = train_test_random_newvector(trainall(2,:),[8 100 100 200 200 200 8 20 80] );
+    train1 = trainall(:,indexes);
+    test_true = trainall;
+    test_true(:,indexes) = [];
+    test1 = zeros(2,sz(1)*sz(2));
+    test1(1,:) = 1:sz(1)*sz(2);
+    test1(2,trainall(1,:)) = trainall(2,:);
+   
+    train = im(:,train1(1,:));
+    test = im;
+    y = train1(2,:);
+    y_test = test1(2,:);
+            
+            ws=5;sigma=1/(2^2);       
+            K=0;K_test=0;sigma_r=0.1;miu=0.2;miu_spe=0.001;
+            baita=3;
+            tic;
+        %    mulity = [1 2 4 8];  
+              mulity = [1];  
+             for j = mulity
+                
+             num =j*400;  
+             [labels] = mex_ers(double(img1),num);
+            allcases=cal_all_scmk(im,labels,sigma,sigma_r,sz,miu);
+            [K2,a1] = calculateTrainK2(labels,train1,allcases,sz);
+            K_t=calculateTestK2(labels,test1,a1,sz);
+            K=K+K2;K_test=K_test+K_t;
+             end  
+            K=K./numel(mulity);
+            K_test=K_test./numel(mulity); 
+ 
+      %      [K2_spe,K_t_spe]=cal_spekernel(im,train,baita);
+               [K2_spe,K_t_spe]=cal_spekernel_1(im,train,sigma);
+       
+      %     K=(1-miu_spe)*K+miu_spe*K2_spe;K_test=(1-miu_spe)*K_test+miu_spe*K_t_spe;
+              K=miu_spe*K+(1-miu_spe)*K2_spe;K_test=miu_spe*K_test+(1-miu_spe)*K_t_spe;
+              
+            n=size(train1,2);
+            %-------------------------libsvm for train------------------
+ 
+            libK = [(1:n)' K];
+            train_label = y';
+            model_precomputed = svmtrain(train_label, libK, '-t 4 -g 4.86 -c 16.34 ');
+  
+
+            %----------------------libsvm for testing------------------
+            p_svm = [];             
+            K_test = [(1:sz(1)*sz(2))' K_test];
+           
+           [predict_label_P, accuracy_P] = svmpredict((1:sz(1)*sz(2))', K_test, model_precomputed);
+            
+    class1=predict_label_P';
+    [a.OA,a.kappa,a.AA,a.CA] = calcError( test_true(2,:)-1, class1(test_true(1,:))-1, 1: k);
+    AA_SVM(iter) = a.AA;
+    Kappa_SVM(iter) = a.kappa;
+    CA_SVM= [CA_SVM a.CA];
+    OA_SVM(iter)=a.OA
+    
+end
+
+%-------------------------------------------------------------------------%
+%  evaluation of the algorithm performance
+%-------------------------------------------------------------------------%
+%%
+% compute the mean OAs over MMiter MC runs
+mean_SVM_classification = mean(OA_SVM)
+STD_OA_SVM = std(OA_SVM)
+mean_AA = mean(AA_SVM)
+STD_AA_SVM = std(AA_SVM)
+mean_kappa = mean(Kappa_SVM)
+STD_kappa = std(Kappa_SVM)
+mean_CA = mean(CA_SVM,2)
+
+load('Pavia_gtt.mat')
+Nonzero_map = zeros(sz(1),sz(2)); f = pavia_gt;
+Nonzero_index =  find(f ~= 0);
+Nonzero_map(Nonzero_index)=1;%
+classmap=reshape(class1, sz(1),sz(2));
+
+wholeim=label2color_2(classmap,'center');
+figure,imshow(wholeim,'border','tight');set (gcf,'Position',[700,100,350,350]);
+
+resultmap=classmap.*Nonzero_map;
+partofim=label2color_2(resultmap,'center');
+figure,imshow(partofim,'border','tight');set (gcf,'Position',[700,100,350,350]);
+
+gt=label2color_2(f,'center');
+figure,imshow(gt,'border','tight');set (gcf,'Position',[700,100,350,350]);
+            
+          
